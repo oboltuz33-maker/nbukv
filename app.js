@@ -418,9 +418,17 @@ function init() {
       if (tg.setBottomBarColor) tg.setBottomBarColor('#2c2c2f');
     } catch (e) {}
   }
-  const rules = initRules();
   const code = getStartParam();
   const answer = code && decodeWord(code);
+
+  // Ссылка на слово открыта в обычном браузере — отправляем в Telegram
+  const inTelegram = !!(tg && tg.initData);
+  if (answer && !inTelegram && BOT_USERNAME && APP_SHORT_NAME) {
+    location.replace(buildLink(code));
+    return;
+  }
+
+  const rules = initRules();
   if (answer) {
     showPlay(code, answer);
     if (!rules.seen()) rules.open();
