@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>N букв</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div id="logo" class="logo"></div>
+      <div class="topbar-actions">
+        <span id="attempts" class="pill hidden">0</span>
+        <button id="btn-new" class="icon-btn hidden" title="Загадать своё слово" aria-label="Загадать своё слово">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M12 7v10M7 12h10" stroke="#1f1f21" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </button>
+        <button id="btn-rules" class="icon-btn" title="Правила" aria-label="Правила">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="currentColor"/><circle cx="12" cy="7.2" r="1.6" fill="#1f1f21"/><path d="M12 11v6.5" stroke="#1f1f21" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Экран загадывающего -->
+    <section id="create" class="screen hidden">
+      <div class="create-body">
+        <h2>Загадайте слово</h2>
+        <p class="hint">Существительное в единственном числе, от 3 до 10 букв. Друг попробует его отгадать.</p>
+        <div id="preview" class="board-row preview"></div>
+        <input id="secret" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="Введите слово" maxlength="12">
+        <p id="create-error" class="error"></p>
+      </div>
+
+      <div class="sheet">
+        <div id="create-actions">
+          <p class="sheet-title">Загадайте слово и&nbsp;отправьте&nbsp;другу</p>
+          <button id="make-link" class="btn primary">Загадать</button>
+        </div>
+        <div id="link-box" class="hidden">
+          <p class="sheet-title">Слово из <span id="link-len"></span> загадано!</p>
+          <input id="link" type="text" readonly>
+          <div class="row">
+            <button id="share-link" class="btn primary">Отправить</button>
+            <button id="copy-link" class="btn">Копировать</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Экран отгадывающего -->
+    <section id="play" class="screen hidden">
+      <div id="board-wrap"><div id="board"></div></div>
+
+      <div class="sheet">
+        <p id="toast" class="sheet-title"></p>
+        <div id="result" class="hidden">
+          <div class="row">
+            <button id="share-result" class="btn primary">Поделиться</button>
+            <button id="new-game" class="btn">Загадать своё</button>
+          </div>
+        </div>
+        <div id="keyboard"></div>
+        <button id="give-up" class="link-btn">Сдаться</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- Правила -->
+  <div id="rules" class="modal hidden">
+    <div class="modal-card">
+      <h2>Как играть</h2>
+      <p>Отгадайте загаданное слово за как можно меньшее число попыток. Каждая попытка — слово из того же количества букв.</p>
+      <p>После попытки буквы меняют цвет:</p>
+      <div class="legend">
+        <div><span class="tile-mini absent">К</span> буквы нет в слове</div>
+        <div><span class="tile-mini present">О</span> буква есть, но на другом месте</div>
+        <div><span class="tile-mini correct">Т</span> буква стоит на своём месте</div>
+      </div>
+      <button id="rules-close" class="btn primary">Понятно</button>
+    </div>
+  </div>
+
+  <!-- Показываем ошибки прямо на экране, чтобы их было видно внутри Telegram -->
+  <div id="fatal" class="fatal hidden"></div>
+  <script>
+    function showFatal(msg) {
+      var el = document.getElementById('fatal');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+    window.addEventListener('error', function (e) {
+      if (e.target && e.target.tagName === 'SCRIPT') showFatal('Не удалось загрузить ' + e.target.src);
+      else showFatal('Ошибка: ' + e.message + (e.lineno ? ' (строка ' + e.lineno + ')' : ''));
+    }, true);
+    window.addEventListener('load', function () {
+      if (!window.__nbukvStarted) showFatal('Скрипт игры не запустился. Проверьте, что app.js лежит рядом с index.html.');
+    });
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
