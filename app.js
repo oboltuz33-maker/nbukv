@@ -3,8 +3,8 @@
 // ---------- Настройки ----------
 // Заполните после регистрации Mini App у @BotFather (/newapp).
 // Ссылка вида https://t.me/<BOT_USERNAME>/<APP_SHORT_NAME>?startapp=<код слова>
-const BOT_USERNAME = '';      // например 'nbukv_bot'
-const APP_SHORT_NAME = '';    // например 'play'
+const BOT_USERNAME = 'nbukv_bot';    // например 'nbukv_bot'
+const APP_SHORT_NAME = 'nbukv_puzzle';  // например 'play'
 
 const MIN_LEN = 3;
 const MAX_LEN = 10;
