@@ -18,31 +18,98 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- Кодирование слова в ссылке ----------
 // Слово не передаётся открытым текстом, чтобы его нельзя было подсмотреть в ссылке.
-// Формат: [соль, ...индексы букв со сдвигом] -> base64url.
+// Формат: [соль, ...данные со сдвигом] -> base64url, где данные —
+// [длина слова, ...индексы букв, ...имя автора в UTF-8, контрольная сумма].
+// Старые ссылки (только [соль, ...буквы]) тоже читаются.
+
+const AUTHOR_MAX = 24;
 
 function normalize(s) {
   return s.trim().toLowerCase().replace(/ё/g, 'е');
 }
 
-function encodeWord(word) {
-  const salt = Math.floor(Math.random() * 256);
-  const bytes = [salt, ...[...word].map((ch, i) => (ALPHABET.indexOf(ch) + salt + i * 37) % 256)];
+function toBase64Url(bytes) {
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function decodeWord(code) {
-  try {
-    const b64 = code.replace(/-/g, '+').replace(/_/g, '/');
-    const bytes = [...atob(b64)].map((c) => c.charCodeAt(0));
-    const [salt, ...rest] = bytes;
-    if (rest.length < MIN_LEN || rest.length > MAX_LEN) return null;
-    const idx = rest.map((b, i) => (((b - salt - i * 37) % 256) + 256) % 256);
-    if (idx.some((x) => x >= ALPHABET.length)) return null;
-    return idx.map((x) => ALPHABET[x]).join('');
-  } catch (e) {
-    return null;
+function fromBase64Url(code) {
+  return [...atob(code.replace(/-/g, '+').replace(/_/g, '/'))].map((c) => c.charCodeAt(0));
+}
+
+const shift = (b, salt, i) => (b + salt + i * 37) % 256;
+const unshift = (b, salt, i) => (((b - salt - i * 37) % 256) + 256) % 256;
+const checksum = (arr) => arr.reduce((s, b) => (s + b) % 256, 0);
+
+function encodePuzzle(word, author) {
+  const salt = Math.floor(Math.random() * 256);
+  const name = new TextEncoder().encode([...(author || '')].slice(0, AUTHOR_MAX).join(''));
+  const data = [word.length, ...[...word].map((ch) => ALPHABET.indexOf(ch)), ...name];
+  data.push(checksum(data));
+  return toBase64Url([salt, ...data.map((b, i) => shift(b, salt, i))]);
+}
+
+function decodePuzzle(code) {
+  let bytes;
+  try { bytes = fromBase64Url(code); } catch (e) { return null; }
+  const [salt, ...rest] = bytes;
+  const toWord = (idx) => (idx.every((x) => x < ALPHABET.length) ? idx.map((x) => ALPHABET[x]).join('') : null);
+
+  const data = rest.map((b, i) => unshift(b, salt, i));
+  const n = data[0];
+  if (data.length >= n + 2 && n >= MIN_LEN && n <= MAX_LEN
+      && checksum(data.slice(0, -1)) === data[data.length - 1]) {
+    const word = toWord(data.slice(1, n + 1));
+    if (word) {
+      let author = '';
+      try {
+        author = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(data.slice(n + 1, -1)));
+      } catch (e) {}
+      return { word, author };
+    }
   }
+
+  // Старый формат без длины и автора
+  if (rest.length >= MIN_LEN && rest.length <= MAX_LEN) {
+    const word = toWord(rest.map((b, i) => unshift(b, salt, i)));
+    if (word) return { word, author: '' };
+  }
+  return null;
+}
+
+function currentUserName() {
+  const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  return (user && (user.first_name || user.username)) || '';
+}
+
+// ---------- Словарь ----------
+// words.txt собирается скриптом scripts/build-dict.js
+const DICT_URL = 'words.txt?v=1';
+const dict = { words: null, promise: null };
+
+function loadDictionary() {
+  if (dict.words) return Promise.resolve(dict.words);
+  if (!dict.promise) {
+    dict.promise = fetch(DICT_URL)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((text) => {
+        dict.words = new Set(text.split('\n').map((w) => w.trim()).filter(Boolean));
+        return dict.words;
+      })
+      .catch((e) => {
+        dict.promise = null; // при следующей попытке загрузим заново
+        throw e;
+      });
+  }
+  return dict.promise;
+}
+
+async function isKnownNoun(word) {
+  const words = await loadDictionary();
+  return words.has(word);
 }
 
 function buildLink(code) {
@@ -182,19 +249,31 @@ function showCreate() {
   };
   input.onkeydown = (e) => { if (e.key === 'Enter') $('make-link').click(); };
 
-  $('make-link').onclick = () => {
+  $('make-link').onclick = async () => {
+    const btn = $('make-link');
+    if (btn.disabled) return;
     const word = normalize(input.value);
-    if (!/^[а-я]+$/.test(word)) {
-      err.textContent = 'Только русские буквы, без пробелов и дефисов.';
+    const fail = (msg) => {
+      err.textContent = msg;
       haptic('error');
-      return;
+    };
+    if (!/^[а-я]+$/.test(word)) return fail('Только русские буквы, без пробелов и дефисов.');
+    if (word.length < MIN_LEN || word.length > MAX_LEN) return fail(`Длина слова — от ${MIN_LEN} до ${MAX_LEN} букв.`);
+
+    btn.disabled = true;
+    btn.textContent = 'Проверяем слово…';
+    let known;
+    try {
+      known = await isKnownNoun(word);
+    } catch (e) {
+      return fail('Не удалось загрузить словарь. Проверьте интернет и попробуйте ещё раз.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Загадать';
     }
-    if (word.length < MIN_LEN || word.length > MAX_LEN) {
-      err.textContent = `Длина слова — от ${MIN_LEN} до ${MAX_LEN} букв.`;
-      haptic('error');
-      return;
-    }
-    const link = buildLink(encodeWord(word));
+    if (!known) return fail(`Слова «${word}» нет в словаре существительных в единственном числе.`);
+
+    const link = buildLink(encodePuzzle(word, currentUserName()));
     $('link').value = link;
     $('link-len').textContent = `${word.length} ${plural(word.length, 'буквы', 'букв', 'букв')}`;
     $('link-box').classList.remove('hidden');
@@ -213,9 +292,11 @@ function showCreate() {
 }
 
 // ---------- Экран отгадывающего ----------
-function showPlay(code, answer) {
+function showPlay(code, answer, author) {
   $('create').classList.add('hidden');
   $('play').classList.remove('hidden');
+  $('author').textContent = author ? `Автор слова: ${author}` : '';
+  $('author').classList.toggle('hidden', !author);
 
   const n = answer.length;
   const saveKey = `nbukv:${code}`;
@@ -336,17 +417,37 @@ function showPlay(code, answer) {
     state.current = state.current.slice(0, -1);
   }
 
-  function submit() {
-    if (state.finished) return;
-    if (state.current.length < n) {
-      const row = currentRow();
-      row.classList.remove('shake');
-      void row.offsetWidth;
-      row.classList.add('shake');
-      toast(`Нужно ${n} ${plural(n, 'буква', 'буквы', 'букв')}`);
-      haptic('error');
-      return;
+  function reject(msg) {
+    const row = currentRow();
+    row.classList.remove('shake');
+    void row.offsetWidth;
+    row.classList.add('shake');
+    toast(msg);
+    haptic('error');
+  }
+
+  let checking = false;
+  async function submit() {
+    if (state.finished || checking) return;
+    if (state.current.length < n) return reject(`Нужно ${n} ${plural(n, 'буква', 'буквы', 'букв')}`);
+
+    // Загаданное слово всегда засчитывается, остальные — только из словаря
+    if (state.current !== answer) {
+      checking = true;
+      let known;
+      try {
+        if (!dict.words) toast('Загружаем словарь…');
+        known = await isKnownNoun(state.current);
+      } catch (e) {
+        return reject('Не удалось загрузить словарь, попробуйте ещё раз');
+      } finally {
+        checking = false;
+      }
+      if (!known) return reject('Такого слова нет в словаре');
     }
+
+    clearTimeout(toast.t);
+    $('toast').textContent = hintText;
     state.guesses.push(state.current);
     state.current = '';
     if (state.guesses[state.guesses.length - 1] === answer) {
@@ -389,10 +490,20 @@ function showPlay(code, answer) {
 
     const emoji = { absent: '⬛', present: '⬜', correct: '🟨' };
     const grid = state.guesses.map((g) => score(g, answer).map((s) => emoji[s]).join('')).join('\n');
-    const summary = state.gaveUp
-      ? `N букв: сдался после ${k} ${plural(k, 'попытки', 'попыток', 'попыток')}`
-      : `N букв: отгадал за ${k} ${plural(k, 'попытку', 'попытки', 'попыток')}`;
+    const tries = state.gaveUp
+      ? `${k} ${plural(k, 'попытки', 'попыток', 'попыток')}`
+      : `${k} ${plural(k, 'попытку', 'попытки', 'попыток')}`;
+    let summary;
+    if (author) {
+      summary = state.gaveUp
+        ? `${author}, сдаюсь после ${tries}. Слово было ${answer.toUpperCase()}`
+        : `${author}, твоё слово отгадано за ${tries}!`;
+    } else {
+      summary = state.gaveUp ? `N букв: сдаюсь после ${tries}` : `N букв: слово отгадано за ${tries}!`;
+    }
 
+    // Результат удобнее всего отправить в чат с автором слова
+    $('share-result').textContent = author ? 'Отправить автору' : 'Поделиться';
     $('share-result').onclick = () => share(buildLink(code), `${summary}\n${grid}`);
     $('new-game').onclick = () => showCreate();
   }
@@ -428,18 +539,21 @@ function init() {
     } catch (e) {}
   }
   const code = getStartParam();
-  const answer = code && decodeWord(code);
+  const puzzle = code && decodePuzzle(code);
 
   // Старая ссылка вида ?w=… открыта в обычном браузере — отправляем в Telegram.
   // Ссылки startapp приходят только из Telegram, их не трогаем, иначе будет цикл.
-  if (answer && isBrowserLink(code) && BOT_USERNAME && APP_SHORT_NAME) {
+  if (puzzle && isBrowserLink(code) && BOT_USERNAME && APP_SHORT_NAME) {
     location.replace(buildLink(code));
     return;
   }
 
+  // Словарь грузим заранее, чтобы проверка попыток была мгновенной
+  loadDictionary().catch(() => {});
+
   const rules = initRules();
-  if (answer) {
-    showPlay(code, answer);
+  if (puzzle) {
+    showPlay(code, puzzle.word, puzzle.author);
     if (!rules.seen()) rules.open();
   } else {
     showCreate();

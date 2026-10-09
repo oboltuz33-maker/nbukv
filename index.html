@@ -7,7 +7,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <div class="app">
@@ -53,6 +53,7 @@
 
     <!-- Экран отгадывающего -->
     <section id="play" class="screen hidden">
+      <p id="author" class="author hidden"></p>
       <div id="board-wrap"><div id="board"></div></div>
 
       <div class="sheet">
@@ -73,7 +74,7 @@
   <div id="rules" class="modal hidden">
     <div class="modal-card">
       <h2>Как играть</h2>
-      <p>Отгадайте загаданное слово за как можно меньшее число попыток. Каждая попытка — слово из того же количества букв.</p>
+      <p>Отгадайте загаданное слово за как можно меньшее число попыток. Каждая попытка — существительное в единственном числе из того же количества букв: слова не из словаря не принимаются и попыткой не считаются.</p>
       <p>После попытки буквы меняют цвет:</p>
       <div class="legend">
         <div><span class="tile-mini absent">К</span> буквы нет в слове</div>
@@ -100,6 +101,6 @@
       if (!window.__nbukvStarted) showFatal('Скрипт игры не запустился. Проверьте, что app.js лежит рядом с index.html.');
     });
   </script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
