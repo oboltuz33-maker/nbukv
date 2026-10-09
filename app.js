@@ -60,6 +60,15 @@ function getStartParam() {
     || q.get('w');
 }
 
+// true, если слово пришло только из ?w= и нет никаких признаков запуска внутри Telegram
+function isBrowserLink(code) {
+  const q = new URLSearchParams(location.search);
+  const fromTelegram = (tg && (tg.initData || (tg.initDataUnsafe && tg.initDataUnsafe.start_param)))
+    || q.get('tgWebAppStartParam')
+    || /tgWebApp/.test(location.hash);
+  return !fromTelegram && q.get('w') === code;
+}
+
 // ---------- Подсчёт подсказок ----------
 // correct — на своём месте, present — есть в слове на другом месте, absent — нет.
 // Повторы учитываются: буква подсвечивается не чаще, чем встречается в ответе.
@@ -421,9 +430,9 @@ function init() {
   const code = getStartParam();
   const answer = code && decodeWord(code);
 
-  // Ссылка на слово открыта в обычном браузере — отправляем в Telegram
-  const inTelegram = !!(tg && tg.initData);
-  if (answer && !inTelegram && BOT_USERNAME && APP_SHORT_NAME) {
+  // Старая ссылка вида ?w=… открыта в обычном браузере — отправляем в Telegram.
+  // Ссылки startapp приходят только из Telegram, их не трогаем, иначе будет цикл.
+  if (answer && isBrowserLink(code) && BOT_USERNAME && APP_SHORT_NAME) {
     location.replace(buildLink(code));
     return;
   }
