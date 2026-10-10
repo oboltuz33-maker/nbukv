@@ -7,7 +7,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <div class="app">
@@ -33,6 +33,13 @@
         <input id="secret" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
                placeholder="Введите слово" maxlength="12">
         <p id="create-error" class="error"></p>
+
+        <div class="solo">
+          <p class="solo-title">или сыграйте сами</p>
+          <p class="hint">Игра загадает случайное слово. Сколько в нём букв?</p>
+          <div id="len-picker" class="len-picker"></div>
+          <button id="random-word" class="btn">Случайное слово</button>
+        </div>
       </div>
 
       <div class="sheet">
@@ -101,6 +108,6 @@
       if (!window.__nbukvStarted) showFatal('Скрипт игры не запустился. Проверьте, что app.js лежит рядом с index.html.');
     });
   </script>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

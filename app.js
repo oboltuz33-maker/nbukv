@@ -83,33 +83,66 @@ function currentUserName() {
 }
 
 // ---------- Словарь ----------
-// words.txt собирается скриптом scripts/build-dict.js
-const DICT_URL = 'words.txt?v=1';
-const dict = { words: null, promise: null };
+// words.txt и random.txt собираются скриптом scripts/build-dict.js
+const DICT_URL = 'words.txt?v=1';     // все допустимые слова — для проверки попыток
+const RANDOM_URL = 'random.txt?v=1';  // узнаваемые слова 4–8 букв — для случайной игры
+const RANDOM_LENGTHS = [4, 5, 6, 7, 8];
+const RECENT_MAX = 100;               // столько последних случайных слов не повторяем
+
+// Загружает список слов один раз; при ошибке следующий вызов попробует снова
+function wordListLoader(url) {
+  const list = { words: null, promise: null };
+  list.load = () => {
+    if (list.words) return Promise.resolve(list.words);
+    if (!list.promise) {
+      list.promise = fetch(url)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.text();
+        })
+        .then((text) => {
+          list.words = text.split('\n').map((w) => w.trim()).filter(Boolean);
+          return list.words;
+        })
+        .catch((e) => {
+          list.promise = null;
+          throw e;
+        });
+    }
+    return list.promise;
+  };
+  return list;
+}
+
+const dict = wordListLoader(DICT_URL);
+const randomWords = wordListLoader(RANDOM_URL);
+let dictSet = null;
 
 function loadDictionary() {
-  if (dict.words) return Promise.resolve(dict.words);
-  if (!dict.promise) {
-    dict.promise = fetch(DICT_URL)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((text) => {
-        dict.words = new Set(text.split('\n').map((w) => w.trim()).filter(Boolean));
-        return dict.words;
-      })
-      .catch((e) => {
-        dict.promise = null; // при следующей попытке загрузим заново
-        throw e;
-      });
-  }
-  return dict.promise;
+  return dict.load().then((words) => (dictSet = dictSet || new Set(words)));
 }
 
 async function isKnownNoun(word) {
   const words = await loadDictionary();
   return words.has(word);
+}
+
+async function pickRandomWord(len) {
+  const pool = (await randomWords.load()).filter((w) => w.length === len);
+  const recent = storageGet('nbukv:recent') || [];
+  const fresh = pool.filter((w) => !recent.includes(w));
+  const from = fresh.length ? fresh : pool;
+  const word = from[Math.floor(Math.random() * from.length)];
+  storageSet('nbukv:recent', [word, ...recent].slice(0, RECENT_MAX));
+  return word;
+}
+
+// Случайная игра с собой: запоминаем код, чтобы продолжить её после перезапуска
+async function startSolo(len) {
+  const word = await pickRandomWord(len);
+  const code = encodePuzzle(word, '');
+  storageSet('nbukv:solo', code);
+  showPlay(code, word, '', { solo: true });
 }
 
 function buildLink(code) {
@@ -216,6 +249,39 @@ function showCreate() {
   $('btn-new').classList.add('hidden');
   setLogo('N');
   if (tg) tg.BackButton.hide();
+  currentGame++; // таймеры прошлой игры больше не трогают экран
+
+  // Игра с собой: выбор длины и случайное слово
+  let soloLen = storageGet('nbukv:solo-len');
+  if (!RANDOM_LENGTHS.includes(soloLen)) soloLen = 5;
+  const picker = $('len-picker');
+  picker.innerHTML = '';
+  for (const len of RANDOM_LENGTHS) {
+    const chip = document.createElement('button');
+    chip.className = 'len-chip' + (len === soloLen ? ' active' : '');
+    chip.textContent = len;
+    chip.onclick = () => {
+      soloLen = len;
+      storageSet('nbukv:solo-len', len);
+      [...picker.children].forEach((c) => c.classList.toggle('active', c === chip));
+    };
+    picker.appendChild(chip);
+  }
+  $('random-word').onclick = async () => {
+    const btn = $('random-word');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Загадываем…';
+    try {
+      await startSolo(soloLen);
+    } catch (e) {
+      $('create-error').textContent = 'Не удалось загрузить словарь. Проверьте интернет и попробуйте ещё раз.';
+      haptic('error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Случайное слово';
+    }
+  };
 
   const input = $('secret');
   const err = $('create-error');
@@ -292,7 +358,10 @@ function showCreate() {
 }
 
 // ---------- Экран отгадывающего ----------
-function showPlay(code, answer, author) {
+let currentGame = 0;
+
+function showPlay(code, answer, author, opts = {}) {
+  const gameId = ++currentGame;
   $('create').classList.add('hidden');
   $('play').classList.remove('hidden');
   $('author').textContent = author ? `Автор слова: ${author}` : '';
@@ -310,10 +379,7 @@ function showPlay(code, answer, author) {
   $('btn-new').classList.remove('hidden');
   $('btn-new').onclick = () => showCreate();
 
-  if (tg) {
-    tg.BackButton.show();
-    tg.BackButton.onClick(() => showCreate());
-  }
+  if (tg) tg.BackButton.show();
 
   const hintText = `Составьте слово из ${n} ${plural(n, 'буквы', 'букв', 'букв')}`;
   let inputRow = null;
@@ -398,7 +464,9 @@ function showPlay(code, answer, author) {
   function toast(msg) {
     $('toast').textContent = msg;
     clearTimeout(toast.t);
-    toast.t = setTimeout(() => { if (!state.finished) $('toast').textContent = hintText; }, 2000);
+    toast.t = setTimeout(() => {
+      if (!state.finished && gameId === currentGame) $('toast').textContent = hintText;
+    }, 2000);
   }
 
   function type(ch) {
@@ -505,7 +573,13 @@ function showPlay(code, answer, author) {
     // Результат удобнее всего отправить в чат с автором слова
     $('share-result').textContent = author ? 'Отправить автору' : 'Поделиться';
     $('share-result').onclick = () => share(buildLink(code), `${summary}\n${grid}`);
-    $('new-game').onclick = () => showCreate();
+    if (opts.solo) {
+      $('new-game').textContent = 'Ещё слово';
+      $('new-game').onclick = () => startSolo(n).catch(() => toast('Не удалось загрузить словарь'));
+    } else {
+      $('new-game').textContent = 'Загадать своё';
+      $('new-game').onclick = () => showCreate();
+    }
   }
 
   document.onkeydown = (e) => {
@@ -551,10 +625,20 @@ function init() {
   // Словарь грузим заранее, чтобы проверка попыток была мгновенной
   loadDictionary().catch(() => {});
 
+  if (tg) tg.BackButton.onClick(() => showCreate());
+
+  // Без ссылки на слово продолжаем незаконченную игру с собой, если она есть
+  const soloCode = storageGet('nbukv:solo');
+  const solo = !puzzle && soloCode && decodePuzzle(soloCode);
+  const soloSaved = solo && storageGet(`nbukv:${soloCode}`);
+  const resumeSolo = solo && !(soloSaved && soloSaved.finished);
+
   const rules = initRules();
   if (puzzle) {
     showPlay(code, puzzle.word, puzzle.author);
     if (!rules.seen()) rules.open();
+  } else if (resumeSolo) {
+    showPlay(soloCode, solo.word, '', { solo: true });
   } else {
     showCreate();
     if (code) $('create-error').textContent = 'Ссылка повреждена — не удалось прочитать слово.';
